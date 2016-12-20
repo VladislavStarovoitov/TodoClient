@@ -110,6 +110,7 @@
     <Compile Include="Infrastructure\Mappers.cs" />
     <Compile Include="Models\ToDoViewModel.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="Services\IdInfo.cs" />
     <Compile Include="Services\Message.cs" />
     <Compile Include="Services\ToDoService.cs" />
     <Compile Include="Services\UserService.cs" />

@@ -10,6 +10,7 @@ using DAL.ORM;
 using todoclient.Infrastructure;
 using System.Threading.Tasks;
 using todoclient.Services;
+using System.Threading;
 
 namespace ToDoClient.Services
 {
@@ -23,7 +24,7 @@ namespace ToDoClient.Services
         /// <summary>
         /// The service URL.
         /// </summary>
-        private readonly string serviceApiUrl = ConfigurationManager.AppSettings["ToDoServiceUrl"];
+        private static readonly string serviceApiUrl = ConfigurationManager.AppSettings["ToDoServiceUrl"];
 
         /// <summary>
         /// The url for getting all todos.
@@ -51,14 +52,24 @@ namespace ToDoClient.Services
 
         private static object locker = new object();
 
+        private static List<IdInfo> idPull = new List<IdInfo>();
+
+        static ToDoService()
+        {
+            foreach (var item in new ToDoRepository(new ToDoContext()).GetAll())
+            {
+                idPull.Add(new IdInfo() { DbId = item.Id, AzureId = item.AzureId });
+            }
+
+            Task.Run(() => WorkWithQueue());
+        }
+
         /// <summary>
         /// Creates the service.
         /// </summary>
         public ToDoService()
         {
             this.repository = new ToDoRepository(new ToDoContext());
-            httpClient = new HttpClient();
-            httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         }
 
         /// <summary>
@@ -79,9 +90,7 @@ namespace ToDoClient.Services
         public void CreateItem(ToDoItemViewModel item)
         {
             repository.Create(item.ToToDoDal());
-            httpClient.PostAsJsonAsync(serviceApiUrl + CreateUrl, item);
-            var result = repository.GetAll();
-            Task.Run(() => UpdateInfo(item.UserId, result));
+            listOfChanges.Add(new Message(item, Operation.Create));
         }
 
         /// <summary>
@@ -90,35 +99,11 @@ namespace ToDoClient.Services
         /// <param name="item">The todo to update.</param>
         public void UpdateItem(ToDoItemViewModel item)
         {
-            if (repository.Update(item.ToToDoDal()))
-            {
-                var cloudId = repository.Get(item.ToDoId).AzureId;
-                if (cloudId.HasValue)
-                {
-                    item.ToDoId = cloudId.Value;
-                    httpClient.PutAsJsonAsync(serviceApiUrl + UpdateUrl, item);
-                }
-                else
-                {
-                    lock (locker)
-                    {
-                        var change = listOfChanges.SingleOrDefault(i => i.ToDo.ToDoId == item.ToDoId);
+            repository.Update(item.ToToDoDal());
 
-                        if (ReferenceEquals(change, null))
-                        {
-                            listOfChanges.Add(new Message(item, Operation.Update));
-                        }
-                        else
-                        {
-                            change.Operation = Operation.Update;
-                            change.ToDo = item;
-                        }
-                    }
-
-                    var result = repository.GetAll();
-                    Task.Run(() => UpdateInfo(item.UserId, result));
-                }
-            }
+            listOfChanges.RemoveAll(i => i.ToDo.ToDoId == item.ToDoId && i.Operation != Operation.Create);
+            
+            listOfChanges.Add(new Message(item, Operation.Update));
         }
 
         /// <summary>
@@ -127,57 +112,48 @@ namespace ToDoClient.Services
         /// <param name="id">The todo Id to delete.</param>
         public void DeleteItem(int id)
         {
-            var item = repository.Get(id);
-            if (item.AzureId.HasValue)
-            {
-                var cloudId = item.AzureId;
+            var item = repository.Delete(id).ToToDoViewModel();
 
-                if (repository.Delete(id))
-                {
-                    httpClient.DeleteAsync(string.Format(serviceApiUrl + DeleteUrl, cloudId));
-                }
-            }
-            else
-            {
-                var result = repository.GetAll();
-                Task.Run(() => UpdateInfo(item.UserId, result));
-                repository.Delete(id);
-            }
+            listOfChanges.RemoveAll(i => i.ToDo.ToDoId == id && i.Operation != Operation.Create);
+
+            listOfChanges.Add(new Message(item, Operation.Delete));
         }
 
-        private void UpdateInfo(int userId, IEnumerable<ToDo> result)
+        private static void WorkWithQueue()
         {
-            var dataAsString = httpClient.GetStringAsync(string.Format(serviceApiUrl + GetAllUrl, userId)).Result;
-            var list = JsonConvert.DeserializeObject<IEnumerable<ToDoItemViewModel>>(dataAsString).OrderBy(i => i.ToDoId).ToList();
-            
-            for (int i = 0; i < result.Count(); i++)
+            while (true)
             {
-                var toDoFromDb = result.ToList()[i];
-                if (ReferenceEquals(toDoFromDb.AzureId, null))
+                foreach (var action in listOfChanges)
                 {
-                    toDoFromDb.AzureId = list[i].ToDoId;
-                }
-            }
+                    var httpClient = new HttpClient();
+                    httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
-            repository.SaveChanges();
-
-            lock (locker)
-            {
-                foreach (var change in listOfChanges)
-                {
-                    switch (change.Operation)
+                    var repository = new ToDoRepository(new ToDoContext());
+                    var idLock = idPull.FirstOrDefault(i => (int)i.DbId == action.ToDo.ToDoId);
+                    lock (idLock)
                     {
-                        case Operation.Update:
-                            change.ToDo.ToDoId = result.FirstOrDefault(t => t.Id == change.ToDo.ToDoId).AzureId.Value;
-                            httpClient.PutAsJsonAsync(serviceApiUrl + UpdateUrl, change.ToDo);
-                            break;
-                        case Operation.Delete:
-                            int deleteId = result.FirstOrDefault(t => t.Id == change.Id).AzureId.Value;
-                            httpClient.DeleteAsync(string.Format(serviceApiUrl + DeleteUrl, deleteId));
-                            break;
-                    }
+                        switch (action.Operation)
+                        {
+                            case Operation.Create:
+                                httpClient.PostAsJsonAsync(serviceApiUrl + CreateUrl, action.ToDo).Result.EnsureSuccessStatusCode();
+                                var dataAsString = httpClient.GetStringAsync(string.Format(serviceApiUrl + GetAllUrl, action.ToDo.UserId)).Result;
+                                var list = JsonConvert.DeserializeObject<IEnumerable<ToDoItemViewModel>>(dataAsString).OrderBy(i => i.ToDoId).ToList();
+                                
+                                var toDo = repository.Get((int)idLock.DbId);
+                                toDo.AzureId = list[(int)idLock.Position].ToDoId;
 
-                    listOfChanges.Remove(change);
+                                repository.Update(toDo);
+                                break;
+
+                            case Operation.Update:
+                                httpClient.PutAsJsonAsync(serviceApiUrl + UpdateUrl, action.ToDo).Result.EnsureSuccessStatusCode();
+                                break;
+
+                            case Operation.Delete:
+                                httpClient.DeleteAsync(string.Format(serviceApiUrl + DeleteUrl, idPull[action.ToDo.ToDoId])).Result.EnsureSuccessStatusCode();
+                                break;
+                        }
+                    }
                 }
             }
         }
