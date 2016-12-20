@@ -16,6 +16,6 @@ namespace DAL.ORM
 
         public int UserId { get; set; }
 
-        public int AzureId { get; set; }
+        public int? AzureId { get; set; }
     }
 }

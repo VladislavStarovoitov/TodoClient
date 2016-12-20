@@ -17,7 +17,7 @@ namespace ToDoClient.Controllers
         /// Returns all todo-items for the current user.
         /// </summary>
         /// <returns>The list of todo-items.</returns>
-        public IList<ToDoItemViewModel> Get()
+        public IEnumerable<ToDoItemViewModel> Get()
         {
             var userId = userService.GetOrCreateUser();
             return todoService.GetItems(userId);

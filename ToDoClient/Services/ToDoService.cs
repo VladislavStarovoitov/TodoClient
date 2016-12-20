@@ -2,11 +2,14 @@
 using System.Configuration;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Linq;
 using Newtonsoft.Json;
 using ToDoClient.Models;
 using DAL.Repositories;
 using DAL.ORM;
 using todoclient.Infrastructure;
+using System.Threading.Tasks;
+using todoclient.Services;
 
 namespace ToDoClient.Services
 {
@@ -15,6 +18,8 @@ namespace ToDoClient.Services
     /// </summary>
     public class ToDoService
     {
+        private static List<Message> listOfChanges = new List<Message>();
+
         /// <summary>
         /// The service URL.
         /// </summary>
@@ -44,6 +49,8 @@ namespace ToDoClient.Services
 
         private readonly ToDoRepository repository;
 
+        private static object locker = new object();
+
         /// <summary>
         /// Creates the service.
         /// </summary>
@@ -59,11 +66,11 @@ namespace ToDoClient.Services
         /// </summary>
         /// <param name="userId">The User Id.</param>
         /// <returns>The list of todos.</returns>
-        public IList<ToDoItemViewModel> GetItems(int userId)
+        public IEnumerable<ToDoItemViewModel> GetItems(int userId)
         {
-            //return repository.GetAll();
-            var dataAsString = httpClient.GetStringAsync(string.Format(serviceApiUrl + GetAllUrl, userId)).Result;
-            return JsonConvert.DeserializeObject<IList<ToDoItemViewModel>>(dataAsString);
+            var result = repository.GetAll();
+            Task.Run(() => GetAll(userId, result.OrderBy(t => t.Id)));
+            return result.Select(t => t.ToToDoViewModel());
         }
 
         /// <summary>
@@ -73,8 +80,7 @@ namespace ToDoClient.Services
         public void CreateItem(ToDoItemViewModel item)
         {
             repository.Create(item.ToToDoDal());
-            httpClient.PostAsJsonAsync(serviceApiUrl + CreateUrl, item)
-                .Result.EnsureSuccessStatusCode();
+            httpClient.PostAsJsonAsync(serviceApiUrl + CreateUrl, item);
         }
 
         /// <summary>
@@ -83,9 +89,20 @@ namespace ToDoClient.Services
         /// <param name="item">The todo to update.</param>
         public void UpdateItem(ToDoItemViewModel item)
         {
-            repository.Update(item.ToToDoDal());
-            httpClient.PutAsJsonAsync(serviceApiUrl + UpdateUrl, item)
-                .Result.EnsureSuccessStatusCode();
+            if (repository.Update(item.ToToDoDal()))
+            {
+                var change = listOfChanges.SingleOrDefault(i => i.ToDo.ToDoId == item.ToDoId);
+
+                if (ReferenceEquals(change, null))
+                {
+                    listOfChanges.Add(new Message(item, Operation.Update));
+                }
+                else
+                {
+                    change.Operation = Operation.Update;
+                    change.ToDo = item;
+                }
+            }
         }
 
         /// <summary>
@@ -94,9 +111,51 @@ namespace ToDoClient.Services
         /// <param name="id">The todo Id to delete.</param>
         public void DeleteItem(int id)
         {
-            repository.Delete(id);
-            httpClient.DeleteAsync(string.Format(serviceApiUrl + DeleteUrl, id))
-                .Result.EnsureSuccessStatusCode();
+            if (repository.Delete(id))
+            {
+                var change = listOfChanges.SingleOrDefault(i => i.ToDo.ToDoId == id);
+
+                if (ReferenceEquals(change, null))
+                {
+                    listOfChanges.Add(new Message(id, Operation.Update));
+                }
+                else
+                {
+                    change.Operation = Operation.Update;
+                    change.Id = id;
+                }
+            }
+        }
+
+        private void GetAll(int userId, IEnumerable<ToDo> result)
+        {
+            var dataAsString = httpClient.GetStringAsync(string.Format(serviceApiUrl + GetAllUrl, userId)).Result;
+            var list = JsonConvert.DeserializeObject<IEnumerable<ToDoItemViewModel>>(dataAsString).OrderBy(i => i.ToDoId).ToList();
+
+            for (int i = 0; i < result.Count(); i++)
+            {
+                var toDoFromDb = result.ToList()[i];
+                if (ReferenceEquals(toDoFromDb.AzureId, null))
+                {
+                    toDoFromDb.AzureId = list[i].ToDoId;
+                } 
+            }
+
+            lock (locker)
+            {
+                foreach (var change in listOfChanges)
+                {
+                    switch (change.Operation)
+                    {
+                        case Operation.Update:
+                            httpClient.PutAsJsonAsync(serviceApiUrl + UpdateUrl, change.ToDo);
+                            break;
+                        case Operation.Delete:
+                            httpClient.DeleteAsync(string.Format(serviceApiUrl + DeleteUrl, change.Id));
+                            break;
+                    }
+                }
+            }
         }
     }
 }
