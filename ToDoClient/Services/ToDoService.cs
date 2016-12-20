@@ -152,6 +152,7 @@ namespace ToDoClient.Services
                                     break;
 
                                 case Operation.Update:
+                                    action.ToDo.ToDoId = (int)idLock.AzureId;
                                     httpClient.PutAsJsonAsync(serviceApiUrl + UpdateUrl, action.ToDo).Result.EnsureSuccessStatusCode();
                                    
                                     break;
