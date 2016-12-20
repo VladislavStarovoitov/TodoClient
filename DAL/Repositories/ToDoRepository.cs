@@ -46,6 +46,11 @@ namespace DAL.Repositories
             return _dataBase.SaveChanges() > 0;
         }
 
+        public bool SaveChanges()
+        {
+            return _dataBase.SaveChanges() > 0;
+        }
+
         public void Dispose()
         {
             _dataBase.Dispose();

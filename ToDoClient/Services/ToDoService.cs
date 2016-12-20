@@ -69,7 +69,7 @@ namespace ToDoClient.Services
         public IEnumerable<ToDoItemViewModel> GetItems(int userId)
         {
             var result = repository.GetAll();
-            Task.Run(() => GetAll(userId, result.OrderBy(t => t.Id)));
+            Task.Run(() => GetAll(userId, result));
             return result.Select(t => t.ToToDoViewModel());
         }
 
@@ -81,6 +81,8 @@ namespace ToDoClient.Services
         {
             repository.Create(item.ToToDoDal());
             httpClient.PostAsJsonAsync(serviceApiUrl + CreateUrl, item);
+            var result = repository.GetAll().OrderBy(t => t.Id);
+            Task.Run(() => GetAll(item.UserId, result));
         }
 
         /// <summary>
@@ -91,16 +93,19 @@ namespace ToDoClient.Services
         {
             if (repository.Update(item.ToToDoDal()))
             {
-                var change = listOfChanges.SingleOrDefault(i => i.ToDo.ToDoId == item.ToDoId);
+                lock (locker)
+                {
+                    var change = listOfChanges.SingleOrDefault(i => i.ToDo.ToDoId == item.ToDoId);
 
-                if (ReferenceEquals(change, null))
-                {
-                    listOfChanges.Add(new Message(item, Operation.Update));
-                }
-                else
-                {
-                    change.Operation = Operation.Update;
-                    change.ToDo = item;
+                    if (ReferenceEquals(change, null))
+                    {
+                        listOfChanges.Add(new Message(item, Operation.Update));
+                    }
+                    else
+                    {
+                        change.Operation = Operation.Update;
+                        change.ToDo = item;
+                    }
                 }
             }
         }
@@ -113,16 +118,19 @@ namespace ToDoClient.Services
         {
             if (repository.Delete(id))
             {
-                var change = listOfChanges.SingleOrDefault(i => i.ToDo.ToDoId == id);
+                lock (locker)
+                {
+                    var change = listOfChanges.SingleOrDefault(i => i.ToDo.ToDoId == id);
 
-                if (ReferenceEquals(change, null))
-                {
-                    listOfChanges.Add(new Message(id, Operation.Update));
-                }
-                else
-                {
-                    change.Operation = Operation.Update;
-                    change.Id = id;
+                    if (ReferenceEquals(change, null))
+                    {
+                        listOfChanges.Add(new Message(id, Operation.Delete));
+                    }
+                    else
+                    {
+                        change.Operation = Operation.Update;
+                        change.Id = id;
+                    }
                 }
             }
         }
@@ -132,14 +140,21 @@ namespace ToDoClient.Services
             var dataAsString = httpClient.GetStringAsync(string.Format(serviceApiUrl + GetAllUrl, userId)).Result;
             var list = JsonConvert.DeserializeObject<IEnumerable<ToDoItemViewModel>>(dataAsString).OrderBy(i => i.ToDoId).ToList();
 
+            foreach (var item in list)
+            {
+                httpClient.DeleteAsync(string.Format(serviceApiUrl + DeleteUrl, item.ToDoId));
+            }
+
             for (int i = 0; i < result.Count(); i++)
             {
                 var toDoFromDb = result.ToList()[i];
                 if (ReferenceEquals(toDoFromDb.AzureId, null))
                 {
                     toDoFromDb.AzureId = list[i].ToDoId;
-                } 
+                }
             }
+
+            repository.SaveChanges();
 
             lock (locker)
             {
@@ -148,12 +163,16 @@ namespace ToDoClient.Services
                     switch (change.Operation)
                     {
                         case Operation.Update:
+                            change.ToDo.ToDoId = result.FirstOrDefault(t => t.Id == change.ToDo.ToDoId).AzureId.Value;
                             httpClient.PutAsJsonAsync(serviceApiUrl + UpdateUrl, change.ToDo);
                             break;
                         case Operation.Delete:
-                            httpClient.DeleteAsync(string.Format(serviceApiUrl + DeleteUrl, change.Id));
+                            int deleteId = result.FirstOrDefault(t => t.Id == change.Id).AzureId.Value;
+                            httpClient.DeleteAsync(string.Format(serviceApiUrl + DeleteUrl, deleteId));
                             break;
                     }
+
+                    listOfChanges.Remove(change);
                 }
             }
         }
