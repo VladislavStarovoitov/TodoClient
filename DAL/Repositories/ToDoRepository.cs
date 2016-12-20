@@ -16,6 +16,11 @@ namespace DAL.Repositories
             _dataBase = context;
         }
 
+        public ToDo Get(int id)
+        {
+            return _dataBase.Set<ToDo>().Find(id);
+        }
+
         public IEnumerable<ToDo> GetAll()
         {
             return _dataBase.Set<ToDo>().Select(x => x);
