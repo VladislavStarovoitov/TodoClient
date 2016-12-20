@@ -61,6 +61,10 @@
     <Compile Include="Migrations\201612200900159_addedAzureId.Designer.cs">
       <DependentUpon>201612200900159_addedAzureId.cs</DependentUpon>
     </Compile>
+    <Compile Include="Migrations\201612201342430_AzureIdNullable.cs" />
+    <Compile Include="Migrations\201612201342430_AzureIdNullable.Designer.cs">
+      <DependentUpon>201612201342430_AzureIdNullable.cs</DependentUpon>
+    </Compile>
     <Compile Include="Migrations\Configuration.cs" />
     <Compile Include="ORM\ToDo.cs" />
     <Compile Include="ORM\ToDoContext.cs" />
@@ -80,6 +84,9 @@
     </EmbeddedResource>
     <EmbeddedResource Include="Migrations\201612200900159_addedAzureId.resx">
       <DependentUpon>201612200900159_addedAzureId.cs</DependentUpon>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Migrations\201612201342430_AzureIdNullable.resx">
+      <DependentUpon>201612201342430_AzureIdNullable.cs</DependentUpon>
     </EmbeddedResource>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
