@@ -26,10 +26,12 @@ namespace DAL.Repositories
             return _dataBase.Set<ToDo>().Select(x => x);
         }
 
-        public bool Create(ToDo toDo)
+        public ToDo Create(ToDo toDo)
         {
-            _dataBase.Set<ToDo>().Add(toDo);
-            return _dataBase.SaveChanges() > 0;
+            var user = _dataBase.Set<ToDo>().Add(toDo);
+            _dataBase.SaveChanges();
+
+            return user;
         }
 
         public bool Update(ToDo toDo)
