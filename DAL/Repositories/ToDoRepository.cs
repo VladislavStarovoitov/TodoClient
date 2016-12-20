@@ -16,6 +16,11 @@ namespace DAL.Repositories
             _dataBase = context;
         }
 
+        public ToDo Get(int id)
+        {
+            return _dataBase.Set<ToDo>().Find(id);
+        }
+
         public IEnumerable<ToDo> GetAll()
         {
             return _dataBase.Set<ToDo>().Select(x => x);
@@ -33,17 +38,13 @@ namespace DAL.Repositories
             return _dataBase.SaveChanges() > 0;
         }
 
-        public bool Delete(int id)
+        public ToDo Delete(int id)
         {
             var entity = _dataBase.Set<ToDo>().Find(id);
+            entity = _dataBase.Set<ToDo>().Remove(entity);
 
-            if (ReferenceEquals(entity, null))
-            {
-                return false;
-            }
-
-            _dataBase.Set<ToDo>().Remove(entity);
-            return _dataBase.SaveChanges() > 0;
+            _dataBase.SaveChanges();
+            return entity;
         }
 
         public bool SaveChanges()
