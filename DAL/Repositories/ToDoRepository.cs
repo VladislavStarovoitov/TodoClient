@@ -28,10 +28,18 @@ namespace DAL.Repositories
 
         public ToDo Create(ToDo toDo)
         {
-            var user = _dataBase.Set<ToDo>().Add(toDo);
+            var result = _dataBase.Set<ToDo>().Add(toDo);
             _dataBase.SaveChanges();
 
-            return user;
+            return result;
+        }
+
+        public IEnumerable<ToDo> AddRange(IEnumerable<ToDo> todos)
+        {
+            var result = _dataBase.Set<ToDo>().AddRange(todos);
+            _dataBase.SaveChanges();
+
+            return result;
         }
 
         public bool Update(ToDo toDo)

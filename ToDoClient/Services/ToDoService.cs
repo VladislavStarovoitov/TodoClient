@@ -21,6 +21,8 @@ namespace ToDoClient.Services
     {
         private static List<Message> listOfChanges = new List<Message>();
 
+        private static bool isInitializated = false;
+
         /// <summary>
         /// The service URL.
         /// </summary>
@@ -46,8 +48,6 @@ namespace ToDoClient.Services
         /// </summary>
         private const string DeleteUrl = "ToDos/{0}";
 
-        private readonly HttpClient httpClient;
-
         private readonly ToDoRepository repository;
 
         private static object locker = new object();
@@ -58,7 +58,7 @@ namespace ToDoClient.Services
         {
             foreach (var item in new ToDoRepository(new ToDoContext()).GetAll())
             {
-                idPull.Add(new IdInfo() { DbId = item.Id, AzureId = item.AzureId, Position = idPull.Count });
+                idPull.Add(new IdInfo() { DbId = item.Id, AzureId = item.AzureId });
             }
 
             Task.Run(() => WorkWithQueue());
@@ -79,8 +79,17 @@ namespace ToDoClient.Services
         /// <returns>The list of todos.</returns>
         public IEnumerable<ToDoItemViewModel> GetItems(int userId)
         {
-            var result = repository.GetAll();
-            return result.Select(t => t.ToToDoViewModel());
+            if (!isInitializated)
+            {
+                var httpClient = new HttpClient();
+                httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+                var dataAsString = httpClient.GetStringAsync(string.Format(serviceApiUrl + GetAllUrl, userId)).Result;
+                var list = JsonConvert.DeserializeObject<IEnumerable<ToDoItemViewModel>>(dataAsString).OrderBy(i => i.ToDoId).ToList();
+                //var result = repository.AddRange(list.Select(x => x.ToToDoDal())).Select(x => x.ToToDoViewModel());
+                isInitializated = true;
+                //return result;
+            }
+            return repository.GetAll().Select(t => t.ToToDoViewModel());
         }
 
         /// <summary>
@@ -90,7 +99,7 @@ namespace ToDoClient.Services
         public void CreateItem(ToDoItemViewModel item)
         {
             var toDo = repository.Create(item.ToToDoDal());
-            idPull.Add(new IdInfo { DbId = toDo.Id, Position = idPull.Count });
+            idPull.Add(new IdInfo { DbId = toDo.Id });
             listOfChanges.Add(new Message(toDo.ToToDoViewModel(), Operation.Create));
         }
 

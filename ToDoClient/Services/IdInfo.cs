@@ -10,7 +10,5 @@ namespace todoclient.Services
         public object DbId { get; set; }
 
         public object AzureId { get; set; }
-
-        public object Position { get; set; }
     }
 }
